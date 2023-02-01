@@ -1,0 +1,56 @@
+import docx
+import requests as requests
+from aiogram import Bot, Dispatcher, executor, types
+from conf import API_TOKEN
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+
+
+def extract_coordinates(file_path):
+    doc = docx.Document(file_path)
+    coordinates = []
+    for table in doc.tables:
+        for row in table.rows:
+            if len(row.cells) >= 3:
+                x_cell = row.cells[1].text
+                y_cell = row.cells[2].text
+                try:
+                    x = float(x_cell.replace(",", "."))
+                    y = float(y_cell.replace(",", "."))
+                    coordinates.append((x, y))
+                except ValueError:
+                    pass
+    return coordinates
+
+
+@dp.message_handler(commands='start')
+async def cmd_start(message: types.Message):
+    await message.answer("Привет! Я умею извлекать координаты из файлов docx. Отправляй файл!")
+
+
+@dp.message_handler(content_types=['document'])
+async def process_file(message: types.Message):
+    file_id = message.document.file_id
+    file = await bot.get_file(file_id)
+    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file.file_path}"
+    response = requests.get(file_url)
+    file_name = message.document.file_name
+    with open("file.docx", "wb") as f:
+        f.write(response.content)
+    coords = extract_coordinates("file.docx")
+    if coords:
+        response = "Координаты:\n"
+        for coord in coords:
+            x, y = coord
+            response += f"x: {x}, y: {y}\n"
+        with open("coords_" + file_name.split(".")[0] + ".txt", "w") as f:
+            f.write(response)
+        with open("coords_" + file_name.split(".")[0] + ".txt", "rb") as f:
+            await bot.send_document(chat_id=message.from_user.id, document=f)
+    else:
+        await bot.send_message(chat_id=message.from_user.id, text="Я не нашел координаты в файле")
+
+
+if __name__ == '__main__':
+    executor.start_polling(dp, skip_updates=True)
